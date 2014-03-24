@@ -1,5 +1,5 @@
 var xml2js = require('xml2js');
-var fs = require('fs');
+var fs = require('graceful-fs');
 var util = require('util');
 var toMarkdown = require('to-markdown');
 var http = require('http');
@@ -22,7 +22,7 @@ function processExport() {
 
 	        var posts = result.rss.channel[0].item;
 
-			
+
 			fs.mkdir('out', function() {
 		        for(var i = 0; i < posts.length; i++) {
 	        		processPost(posts[i]);
@@ -56,107 +56,115 @@ function processPost(post) {
 		}
 	}
 
-	var fullPath = 'out\\' + postDate.getFullYear() + '\\' + getPaddedMonthNumber(postDate.getMonth() + 1) + '\\' + slug;
+	var fullPath = './out/' + postDate.getFullYear() + '/' + getPaddedMonthNumber(postDate.getMonth() + 1) + '/' + getPaddedDayNumber(postDate.getDate()) + '/' + slug;
 
-	fs.mkdir('out\\' + postDate.getFullYear(), function() {
-		fs.mkdir('out\\' + postDate.getFullYear() + '\\' + getPaddedMonthNumber(postDate.getMonth() + 1), function() {
-			fs.mkdir(fullPath, function() {
-				//Find all images
-				var patt = new RegExp("(?:src=\"(.*?)\")", "gi");
-				
-				var m;
-				var matches = [];
-				while((m = patt.exec(postData)) !== null) {
-					matches.push(m[1]);
-					//console.log("Found: " + m[1]);
-				}
+	console.log('*** Full Path: ' + fullPath);
 
+	fs.mkdir('./out/' + postDate.getFullYear(), function() {
+		fs.mkdir('./out/' + postDate.getFullYear() + '/' + getPaddedMonthNumber(postDate.getMonth() + 1), function() {
+			fs.mkdir('./out/' + postDate.getFullYear() + '/' + getPaddedMonthNumber(postDate.getMonth() + 1) + '/' + getPaddedDayNumber(postDate.getDate()), function() {
+				fs.mkdir(fullPath, function() {
+					//Find all images
+					var patt = new RegExp("(?:src=\"(.*?)\")", "gi");
 
-				if(matches != null && matches.length > 0) {
-					for(var i = 0; i < matches.length; i++) {
-						//console.log('Post image found: ' + matches[i])
-
-						var url = matches[i];
-						var urlParts = matches[i].split('/');
-						var imageName = urlParts[urlParts.length - 1];
-
-						var filePath = fullPath + '\\' + imageName;
-
-						downloadFile(url, filePath);
-
-						//Make the image name local relative in the markdown
-						postData = postData.replace(url, imageName);
-						//console.log('Replacing ' + url + ' with ' + imageName);
+					var m;
+					var matches = [];
+					while((m = patt.exec(postData)) !== null) {
+						matches.push(m[1]);
+						//console.log("Found: " + m[1]);
 					}
-				}
 
-				var markdown = toMarkdown.toMarkdown(postData);
+					if(matches != null && matches.length > 0) {
+						for(var i = 0; i < matches.length; i++) {
+							//console.log('Post image found: ' + matches[i])
 
-				//Fix characters that markdown doesn't like
-				// smart single quotes and apostrophe
-    			markdown = markdown.replace(/[\u2018|\u2019|\u201A]/g, "\'");
-    			// smart double quotes
-    			markdown = markdown.replace(/&quot;/g, "\"");
-    			markdown = markdown.replace(/[\u201C|\u201D|\u201E]/g, "\"");
-				// ellipsis
-				markdown = markdown.replace(/\u2026/g, "...");
-				// dashes
-				markdown = markdown.replace(/[\u2013|\u2014]/g, "-");
-				// circumflex
-				markdown = markdown.replace(/\u02C6/g, "^");
-				// open angle bracket
-				markdown = markdown.replace(/\u2039/g, "<");
-				markdown = markdown.replace(/&lt;/g, "<");
-				// close angle bracket
-				markdown = markdown.replace(/\u203A/g, ">");
-				markdown = markdown.replace(/&gt;/g, ">");
-				// spaces
-				markdown = markdown.replace(/[\u02DC|\u00A0]/g, " ");
-				// ampersand
-				markdown = markdown.replace(/&amp;/g, "&");
+							var url = matches[i];
+							var urlParts = matches[i].split('/');
+							var imageName = urlParts[urlParts.length - 1];
 
-				var header = "";
-				header += "---\n";
-				header += "layout: post\n";
-				header += "title: " + postTitle + "\n";
-				header += "date: " + postDate.getFullYear() + '-' + getPaddedMonthNumber(postDate.getMonth() + 1) + '-' + getPaddedDayNumber(postDate.getDate()) + "\n";
-				if(categories.length > 0)
-					header += "tags: " + JSON.stringify(categories) + '\n';
-				header += "---\n";
-				header += "\n";
+							var filePath = fullPath + '/' + imageName;
 
-				fs.writeFile(fullPath + '\\index.html.md', header + markdown, function(err) {
+							downloadFile(url, filePath);
 
+							//Make the image name local relative in the markdown
+							postData = postData.replace(url, imageName);
+							//console.log('Replacing ' + url + ' with ' + imageName);
+						}
+					}
+
+					var markdown = toMarkdown.toMarkdown(postData);
+
+					//Fix characters that markdown doesn't like
+					// smart single quotes and apostrophe
+	    			markdown = markdown.replace(/[\u2018|\u2019|\u201A]/g, "\'");
+	    			// smart double quotes
+	    			markdown = markdown.replace(/&quot;/g, "\"");
+	    			markdown = markdown.replace(/[\u201C|\u201D|\u201E]/g, "\"");
+					// ellipsis
+					markdown = markdown.replace(/\u2026/g, "...");
+					// dashes
+					markdown = markdown.replace(/[\u2013|\u2014]/g, "-");
+					// circumflex
+					markdown = markdown.replace(/\u02C6/g, "^");
+					// open angle bracket
+					markdown = markdown.replace(/\u2039/g, "<");
+					markdown = markdown.replace(/&lt;/g, "<");
+					// close angle bracket
+					markdown = markdown.replace(/\u203A/g, ">");
+					markdown = markdown.replace(/&gt;/g, ">");
+					// spaces
+					markdown = markdown.replace(/[\u02DC|\u00A0]/g, " ");
+					// ampersand
+					markdown = markdown.replace(/&amp;/g, "&");
+
+					var header = '';
+					header += '---\n';
+					header += 'layout: post \n';
+					header += 'title: "' + postTitle + '"\n';
+					header += 'subTitle: ' + '' + '\n';
+					header += 'heroImageUrl: ' + '' + '\n';
+
+					// TODO Check the padded month it was +1 for some reason
+					header += 'date: ' + postDate.getFullYear() + '-' + (postDate.getMonth() +1) + '-' + postDate.getDate() + '\n';
+					if(categories.length > 0)
+						header += 'tags: ' + JSON.stringify(categories) + '\n';
+					header += 'keywords: ' + [] + '\n';
+					header += '---\n';
+					header += '\n';
+
+					fs.writeFile(fullPath + '/index.html.md', header + markdown, function(err) {
+					});
 				});
 			});
-		});		
+		});
 	});
 }
 
 function downloadFile(url, path) {
-	 //console.log("Attempt downloading " + url + " to " + path + ' ' + url.indexOf("https:") );
+	//console.log("Attempt downloading " + url + " to " + path + ' ' + url.indexOf("https:") );
 	if (url.indexOf("https:")  == -1) {
 		if (url.indexOf(".jpg") >=0 || url.indexOf(".png") >=0 || url.indexOf(".png") >=0) {
 			var file = fs.createWriteStream(path).on('open', function() {
 				var request = http.get(url, function(response) {
-				console.log("Response code: " + response.statusCode);
-				response.pipe(file);
+					console.log("Response code: " + response.statusCode);
+					response.pipe(file);
+				}).on('error', function(err) {
+					console.log('error downloading url: ' + url + ' to ' + path);
+				});
 			}).on('error', function(err) {
-				console.log('error downloading url: ' + url + ' to ' + path);
-		});
-		}).on('error', function(err) {
 				console.log('error downloading url2: ' + url + ' to ' + path);
-
-		});
+				console.log(err);
+			});
+		}
+		else {
+		  console.log ('passing on: ' + url + ' ' + url.indexOf('http:'));
+		}
 	}
 	else {
-	  console.log ('passing on: ' + url + ' ' + url.indexOf('https:')); 
-	}
-	}
-	else {
-	  console.log ('passing on: ' + url + ' ' + url.indexOf('https:')); 
+	  console.log ('passing on: ' + url + ' ' + url.indexOf('http:'));
 	}
 }
+
 function getPaddedMonthNumber(month) {
 	if(month < 10)
 		return "0" + month;
