@@ -6,21 +6,18 @@
     "markdown",
     "convert"
   ],
-  "author": "Jason Young - jason@ytechie.com - ytechie.com",
-  "bugs": {
-    "url": "https://github.com/ytechie/wordpress-to-markdown/issues"
-  },
+  "author": "Umut Benzer",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ytechie/wordpress-to-markdown.git"
-  },
-  "engines": {
-    "node": ">=0.8",
-    "npm": ">=1.2"
+    "url": "https://github.com/ubenzer/wordpress-to-markdown.git"
   },
   "dependencies": {
-    "to-markdown": "~0.0.1",
-    "xml2js": "~0.2.8"
+    "batch": "0.5.3",
+    "eol": "0.2.0",
+    "fs-extra": "0.30.0",
+    "httpreq": "0.4.22",
+    "to-markdown": "3.0.0",
+    "xml2js": "0.4.16"
   },
   "main": "convert.js"
 }

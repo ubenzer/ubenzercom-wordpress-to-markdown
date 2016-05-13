@@ -1,180 +1,209 @@
-var xml2js = require('xml2js');
-var fs = require('graceful-fs');
-var util = require('util');
-var toMarkdown = require('to-markdown');
-var http = require('http');
+"use strict";
+var xml2js = require("xml2js");
+var fs = require("fs-extra");
+var toMarkdown = require("to-markdown");
+var shortcode = require('shortcode-parser');
+var eol = require('eol');
+var httpreq = require('httpreq');
 
-processExport();
+shortcode.add('php', function(buf) {
+  return '```php\n' + buf + '\n```';
+});
+shortcode.add('c', function(buf) {
+  return '```c\n' + buf + '\n```';
+});
+shortcode.add('java', function(buf) {
+  return '```java\n' + buf + '\n```';
+});
+shortcode.add('caption', function(buf, opts) {
+  if (opts.caption) {
+    return opts.caption + "\n" + buf;
+  }
+  return buf;
+});
 
-function processExport() {
-	var parser = new xml2js.Parser();
-	fs.readFile('export.xml', function(err, data) {
-		if(err) {
-			console.log('Error: ' + err);
-		}
+var Batch = require('batch'), batch = new Batch;
+batch.concurrency(20);
 
-	    parser.parseString(data, function (err, result) {
-	    	if(err) {
-	    		console.log('Error parsing xml: ' + err);
-	    	}
-	    	console.log('Parsed XML');
-	        //console.log(util.inspect(result.rss.channel));
+fs.emptyDirSync("./out/posts");
+var parser = new xml2js.Parser();
+var data = fs.readFileSync("export.xml");
+parser.parseString(data, function (err, result) {
+  if (err) {
+    console.log("Error parsing xml: " + err);
+  }
+  console.log("Parsed XML");
+  var posts = result.rss.channel[0].item;
+  posts.forEach(processPost);
+});
 
-	        var posts = result.rss.channel[0].item;
-
-
-			fs.mkdir('out', function() {
-		        for(var i = 0; i < posts.length; i++) {
-	        		processPost(posts[i]);
-		        	//console.log(util.inspect(posts[i]));
-		        }
-			});
-	    });
-	});
-}
+batch.on('progress', function(e){
+  console.log(`${e.percent}% - ${e.complete} of ${e.total}`);
+});
+batch.end(function(err, users){
+  console.log(`Download done!`);
+});
 
 function processPost(post) {
-	console.log('Processing Post');
+  if (post["wp:status"][0] !== "publish") {
+    return;
+  }
+  if (post["wp:post_type"][0] !== "post") {
+    return;
+  }
 
-	var postTitle = post.title;
-	console.log('Post title: ' + postTitle);
-	var postDate = new Date(post.pubDate);
-	console.log('Post Date: ' + postDate);
-	var postData = post['content:encoded'][0];
-	console.log('Post length: ' + postData.length + ' bytes');
-	var slug = post['wp:post_name'];
-	console.log('Post slug: ' + slug);
+  var postTitle = post.title;
 
-	//Merge categories and tags into tags
-	var categories = [];
-	if (post.category != undefined) {
-		for(var i = 0; i < post.category.length; i++) {
-			var cat = post.category[i]['_'];
-			if(cat != "Uncategorized")
-				categories.push(cat);
-			//console.log('CATEGORY: ' + util.inspect(post.category[i]['_']));
-		}
-	}
+  console.log("Processing Post: " + postTitle);
 
-	var fullPath = './out/' + postDate.getFullYear() + '/' + getPaddedMonthNumber(postDate.getMonth() + 1) + '/' + getPaddedDayNumber(postDate.getDate()) + '/' + slug;
+  var postDate = new Date(post.pubDate[0]);
+  var postData = post["content:encoded"][0];
+  var slug = post["wp:post_name"][0];
+  var categories = [];
 
-	console.log('*** Full Path: ' + fullPath);
+  post.category.forEach(function(categoryBlob) {
+    var cat = categoryBlob._;
+    if (categoryBlob.$.domain !== "category") {
+      return;
+    }
+    if (cat === "İlişkiler" || cat === "Kişisel" || cat === "Markalar" || cat == "Türkçe") {
+      cat = "Hayat/" +  cat;
+    } else if (cat === "Scala" || cat === "PHP" || cat === "JAVA" || cat == "ANSI C" || cat == ".NET") {
+      cat = "Bilgisayar/Programlama/" +  cat;
+    } else if (cat === "Windows" || cat === "Programlama" || cat === "Bilmuh’çular için" ||
+        cat === "İnternet" || cat === "Linux" || cat === "Mac" || cat === "Bilgisayar Oyunları" ||
+        cat === "Android") {
+      cat = "Bilgisayar/" +  cat;
+    } else if (cat === "Minecraft") {
+      cat = "Bilgisayar/Bilgisayar Oyunları/" +  cat;
+    }
+    categories.push(cat);
+  });
 
-	fs.mkdir('./out/' + postDate.getFullYear(), function() {
-		fs.mkdir('./out/' + postDate.getFullYear() + '/' + getPaddedMonthNumber(postDate.getMonth() + 1), function() {
-			fs.mkdir('./out/' + postDate.getFullYear() + '/' + getPaddedMonthNumber(postDate.getMonth() + 1) + '/' + getPaddedDayNumber(postDate.getDate()), function() {
-				fs.mkdir(fullPath, function() {
-					//Find all images
-					var patt = new RegExp("(?:src=\"(.*?)\")", "gi");
+  var fullPath = "./out/posts/" + postDate.getFullYear() + "/" + getPaddedNumber(postDate.getMonth() + 1) + "/" + slug;
 
-					var m;
-					var matches = [];
-					while((m = patt.exec(postData)) !== null) {
-						matches.push(m[1]);
-						//console.log("Found: " + m[1]);
-					}
+  // Convert two new lines to paragraphs
+  postData = eol.lf(postData);
+  postData = postData.split("<!--more-->");
+  postData = postData.join("<p>---more---</p>");
+  postData = postData.split("\n\n");
+  postData = postData.map(function(aData) {
+    return `<p>${aData}</p>`;
+  });
+  postData = postData.join("\n");
 
-					if(matches != null && matches.length > 0) {
-						for(var i = 0; i < matches.length; i++) {
-							//console.log('Post image found: ' + matches[i])
+  var markdown = null;
+  try {
+    markdown = toMarkdown(postData, {
+      converters: [
+        {
+          filter: function (node) {
+            return node.nodeName === 'A' && node.getAttribute('href');
+          },
+          replacement: function(content, node) {
+            let href = node.getAttribute('href');
+            if (href.startsWith("/deepo/")) {
+              href = "http://www.ubenzer.com" + href;
+            }
+            return '[' + content + '](' + href + ')';
+          }
+        },
+        {
+          filter: 'img',
+          replacement: function(innerHtml, node) {
+            let src = node.getAttribute("src");
+            if (!src) {
+              console.log("IMG WITHOUT SRC!");
+              return "";
+            }
+            let title = "";
+            if (node.getAttribute("title")) {
+              title = node.getAttribute("title");
+            } else if (node.getAttribute("alt")) {
+              title = node.getAttribute("alt");
+            } else {
+              console.log("IMG WITHOUT TITLE: " + src);
+            }
 
-							var url = matches[i];
-							var urlParts = matches[i].split('/');
-							var imageName = urlParts[urlParts.length - 1];
+            if (src === "https://go.microsoft.com/fwlink/?LinkId=161376") {
+              return "";
+            }
 
-							var filePath = fullPath + '/' + imageName;
+            let originalSrc = src.replace(/-[^.-]+(?=\.jpg|.gif|.png)/, "").replace(".thumbnail", "");
+            if (originalSrc.startsWith("/deepo/")) {
+              originalSrc = "http://www.ubenzer.com" + originalSrc;
+            }
 
-							downloadFile(url, filePath);
 
-							//Make the image name local relative in the markdown
-							postData = postData.replace(url, imageName);
-							//console.log('Replacing ' + url + ' with ' + imageName);
-						}
-					}
+            let targetSrc = originalSrc;
+            if (originalSrc.startsWith("http://www.ubenzer.com") ||
+                originalSrc.startsWith("https://www.ubenzer.com")) {
 
-					var markdown = toMarkdown.toMarkdown(postData);
+              let urlParts = originalSrc.split("/");
+              let fileName = urlParts[urlParts.length-1];
+              let downloadPath = fullPath + "/" + fileName;
+              downloadFile(originalSrc, downloadPath);
+              targetSrc = fileName;
+            }
 
-					//Fix characters that markdown doesn't like
-					// smart single quotes and apostrophe
-	    			markdown = markdown.replace(/[\u2018|\u2019|\u201A]/g, "\'");
-	    			// smart double quotes
-	    			markdown = markdown.replace(/&quot;/g, "\"");
-	    			markdown = markdown.replace(/[\u201C|\u201D|\u201E]/g, "\"");
-					// ellipsis
-					markdown = markdown.replace(/\u2026/g, "...");
-					// dashes
-					markdown = markdown.replace(/[\u2013|\u2014]/g, "-");
-					// circumflex
-					markdown = markdown.replace(/\u02C6/g, "^");
-					// open angle bracket
-					markdown = markdown.replace(/\u2039/g, "<");
-					markdown = markdown.replace(/&lt;/g, "<");
-					// close angle bracket
-					markdown = markdown.replace(/\u203A/g, ">");
-					markdown = markdown.replace(/&gt;/g, ">");
-					// spaces
-					markdown = markdown.replace(/[\u02DC|\u00A0]/g, " ");
-					// ampersand
-					markdown = markdown.replace(/&amp;/g, "&");
+            console.log(`Image: ${originalSrc} ${targetSrc}`);
+            return `![${title}](${targetSrc})`; // TODO CLASSNAMES
+          }
+        },
+        {
+          filter: 'strong',
+          replacement: function(innerHtml) {
+            return `*${innerHtml}*`;
+          }
+        }
+      ]
+    });
+  } catch(e) {
+    console.error(postData);
+    throw e;
+  }
 
-					var header = '';
-					header += '---\n';
-					header += 'layout: post \n';
-					header += 'title: "' + postTitle + '"\n';
-					header += 'subTitle: ' + '' + '\n';
-					header += 'heroImageUrl: ' + '' + '\n';
+  markdown = shortcode.parse(markdown);
 
-					// TODO Check the padded month it was +1 for some reason
-					header += 'date: ' + postDate.getFullYear() + '-' + (postDate.getMonth() +1) + '-' + postDate.getDate() + '\n';
-					if(categories.length > 0)
-						header += 'tags: ' + JSON.stringify(categories) + '\n';
-					header += 'keywords: ' + [] + '\n';
-					header += '---\n';
-					header += '\n';
+  markdown = "# " + postTitle + "\n\n" + markdown;
 
-					fs.writeFile(fullPath + '/index.html.md', header + markdown, function(err) {
-					});
-				});
-			});
-		});
-	});
+    var header = "";
+    header += "---\n";
+    header += "created: " + postDate.getFullYear() + "-" + getPaddedNumber(postDate.getMonth() + 1) + "-" + getPaddedNumber(postDate.getDate()) + "\n";
+    if (categories.length > 0) {
+      header += "category:\n";
+      categories.forEach(function(category) {
+        header += "  - " + category + "\n";
+      });
+    }
+
+    header += "---\n";
+
+    fs.outputFile(fullPath + "/index.md", header + markdown, function(err) {
+      if(err !== null) {
+        console.error("Error writing post " + postTitle + " to disk!");
+        throw err;
+      }
+    });
 }
 
 function downloadFile(url, path) {
-	//console.log("Attempt downloading " + url + " to " + path + ' ' + url.indexOf("https:") );
-	if (url.indexOf("https:")  == -1) {
-		if (url.indexOf(".jpg") >=0 || url.indexOf(".png") >=0 || url.indexOf(".png") >=0) {
-			var file = fs.createWriteStream(path).on('open', function() {
-				var request = http.get(url, function(response) {
-					console.log("Response code: " + response.statusCode);
-					response.pipe(file);
-				}).on('error', function(err) {
-					console.log('error downloading url: ' + url + ' to ' + path);
-				});
-			}).on('error', function(err) {
-				console.log('error downloading url2: ' + url + ' to ' + path);
-				console.log(err);
-			});
-		}
-		else {
-		  console.log ('passing on: ' + url + ' ' + url.indexOf('http:'));
-		}
-	}
-	else {
-	  console.log ('passing on: ' + url + ' ' + url.indexOf('http:'));
-	}
+  batch.push(function(done){
+    console.log(`Downloading ${url} to ${path}...`);
+    httpreq.download(url, path,
+        function (err, progress) {},
+        function (err){
+          if (err) {
+            console.log(url, err);
+          }
+          done();
+        });
+  });
 }
 
-function getPaddedMonthNumber(month) {
-	if(month < 10)
-		return "0" + month;
-	else
-		return month;
-}
-
-function getPaddedDayNumber(day) {
-	if(day < 10)
-		return "0" + day;
-	else
-		return day;
+function getPaddedNumber(num) {
+  if (num < 10) {
+    return "0" + num;
+  }
+  return num;
 }
