@@ -17,3 +17,4 @@ node_modules
 out
 fil-data-out
 .idea
+firebase-key.json
