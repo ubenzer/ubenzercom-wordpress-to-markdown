@@ -1,56 +1,88 @@
 "use strict";
-var xml2js = require("xml2js");
-var fs = require("fs-extra");
-var toMarkdown = require("to-markdown");
-var shortcode = require('shortcode-parser');
-var eol = require('eol');
-var httpreq = require('httpreq');
+let firebase = require("firebase");
+firebase.initializeApp({
+  databaseURL: "https://ubenzer.firebaseio.com/",
+  serviceAccount: "firebase-key.json"
+});
 
-shortcode.add('php', function(buf) {
-  return '```php\n' + buf + '\n```';
+// As an admin, the app has access to read and write all data, regardless of Security Rules
+let db = firebase.database();
+let allComments = db.ref("comments");
+allComments.set({});
+
+let xml2js = require("xml2js");
+let fs = require("fs-extra");
+let path = require("path");
+let toMarkdown = require("to-markdown");
+let shortcode = require("shortcode-parser");
+let eol = require("eol");
+let httpreq = require("httpreq");
+let Batch = require("batch");
+
+shortcode.add("php", function(buf) {
+  return "```php\n" + buf + "\n```";
 });
-shortcode.add('c', function(buf) {
-  return '```c\n' + buf + '\n```';
+shortcode.add("c", function(buf) {
+  return "```c\n" + buf + "\n```";
 });
-shortcode.add('java', function(buf) {
-  return '```java\n' + buf + '\n```';
+shortcode.add("java", function(buf) {
+  return "```java\n" + buf + "\n```";
 });
-shortcode.add('caption', function(buf, opts) {
+shortcode.add("caption", function(buf, opts) {
   if (opts.caption) {
     return opts.caption + "\n" + buf;
   }
   return buf;
 });
 
-var Batch = require('batch'), batch = new Batch;
-batch.concurrency(20);
+let downloadedFiles = new Set();
+let batch = new Batch;
+batch.concurrency(30);
 
-fs.emptyDirSync("./out/posts");
-var parser = new xml2js.Parser();
-var data = fs.readFileSync("export.xml");
+//fs.emptyDirSync("./out/posts");
+
+let idLookup = {};
+let parser = new xml2js.Parser();
+let data = fs.readFileSync("/Users/ub/Downloads/ubenzerumutbenzerodakim.wordpress.2016-05-19.xml");
 parser.parseString(data, function (err, result) {
   if (err) {
     console.log("Error parsing xml: " + err);
   }
   console.log("Parsed XML");
   var posts = result.rss.channel[0].item;
+  posts.forEach(createIdLookup);
   posts.forEach(processPost);
 });
 
-batch.on('progress', function(e){
+batch.on("progress", function(e) {
   console.log(`${e.percent}% - ${e.complete} of ${e.total}`);
 });
-batch.end(function(err, users){
-  console.log(`Download done!`);
+batch.end(function() {
+  console.log(`Batch jobs done!`);
+  process.exit(0);
 });
 
-function processPost(post) {
+function isPostValid(post) {
   if (post["wp:status"][0] !== "publish") {
-    return;
+    return false;
   }
   if (post["wp:post_type"][0] !== "post") {
-    return;
+    return false;
   }
+  return true;
+}
+function createIdLookup(post) {
+  if (!isPostValid(post)) { return; }
+
+  var slug = post["wp:post_name"][0];
+  var postDate = new Date(post.pubDate[0]);
+  var id = postDate.getFullYear() + "/" + getPaddedNumber(postDate.getMonth() + 1) + "/" + slug;
+
+  idLookup[slug] = id;
+}
+
+function processPost(post) {
+  if (!isPostValid(post)) { return; }
 
   var postTitle = post.title;
 
@@ -60,6 +92,17 @@ function processPost(post) {
   var postData = post["content:encoded"][0];
   var slug = post["wp:post_name"][0];
   var categories = [];
+  var id = postDate.getFullYear() + "/" + getPaddedNumber(postDate.getMonth() + 1) + "/" + slug;
+
+  // process post comments
+  let comments = post["wp:comment"];
+  if (comments instanceof Array) {
+    comments.forEach((comment) => {
+      uploadComment(id, comment);
+    });
+  }
+
+  // end comments
 
   post.category.forEach(function(categoryBlob) {
     var cat = categoryBlob._;
@@ -81,6 +124,7 @@ function processPost(post) {
   });
 
   var fullPath = "./out/posts/" + postDate.getFullYear() + "/" + getPaddedNumber(postDate.getMonth() + 1) + "/" + slug;
+  fs.ensureDirSync(fullPath);
 
   // Convert two new lines to paragraphs
   postData = eol.lf(postData);
@@ -102,52 +146,78 @@ function processPost(post) {
           },
           replacement: function(content, node) {
             let href = node.getAttribute('href');
-            if (href.startsWith("/deepo/")) {
-              href = "http://www.ubenzer.com" + href;
+
+            if (isUBenzerUrl(href)) {
+              let source = normalizeUBenzerUrl(href);
+              let target = normalizeUBenzerUrl(href, true);
+              let downloadPath = fullPath + "/" + target;
+
+              if (isFileImage(target)) {
+                console.log("THIS IS AN UBENZER IMAGE! " + source);
+                downloadFile(source, downloadPath);
+                // TODO we need to check if it links to itself or something special
+                // ‌‌node.querySelectorAll("*").length
+                // ‌‌node.querySelectorAll("img").length
+                // ‌‌node.querySelectorAll("img")[0].getAttribute("src")
+                return `[${content}](${target})`;
+              } else if (path.extname(target) !== "") {
+                downloadFile(source, downloadPath);
+                return `[${content}](${target})`;
+              } else {
+                // this is an internal link
+                if (!idLookup[target]) {
+                  throw new Error("NOT FOUND INTERNAL LINK: " + href);
+                }
+                return `[${content}](@${idLookup[target]})`;
+              }
             }
-            return '[' + content + '](' + href + ')';
+            // TODO target blank
+            return `[${content}](${href})`;
           }
         },
         {
           filter: 'img',
           replacement: function(innerHtml, node) {
             let src = node.getAttribute("src");
-            if (!src) {
-              console.log("IMG WITHOUT SRC!");
-              return "";
-            }
+            if (!src) { throw new Error("IMG WITHOUT SRC!"); }
             let title = "";
             if (node.getAttribute("title")) {
               title = node.getAttribute("title");
             } else if (node.getAttribute("alt")) {
               title = node.getAttribute("alt");
             } else {
-              console.log("IMG WITHOUT TITLE: " + src);
+              console.log("IMG WITHOUT TITLE: " + src);  // TODO how many?
             }
 
             if (src === "https://go.microsoft.com/fwlink/?LinkId=161376") {
               return "";
             }
 
-            let originalSrc = src.replace(/-[^.-]+(?=\.jpg|.gif|.png)/, "").replace(".thumbnail", "");
-            if (originalSrc.startsWith("/deepo/")) {
-              originalSrc = "http://www.ubenzer.com" + originalSrc;
+            var targetSrc = src;
+            if (isUBenzerUrl(src)) {
+              let source = normalizeUBenzerUrl(src);
+              let target = normalizeUBenzerUrl(src, true);
+
+              let downloadPath = fullPath + "/" + target;
+              downloadFile(source, downloadPath);
+              targetSrc = target;
             }
 
-
-            let targetSrc = originalSrc;
-            if (originalSrc.startsWith("http://www.ubenzer.com") ||
-                originalSrc.startsWith("https://www.ubenzer.com")) {
-
-              let urlParts = originalSrc.split("/");
-              let fileName = urlParts[urlParts.length-1];
-              let downloadPath = fullPath + "/" + fileName;
-              downloadFile(originalSrc, downloadPath);
-              targetSrc = fileName;
+            let classes = [];
+            if (node.classList.contains("alignright")) {
+              classes.push("right");
+            } else if (node.classList.contains("alignleft")) {
+              classes.push("left");
+            } else if (node.classList.contains("aligncenter")) {
+              classes.push("center");
             }
 
-            console.log(`Image: ${originalSrc} ${targetSrc}`);
-            return `![${title}](${targetSrc})`; // TODO CLASSNAMES
+            let text = `![${title}](${targetSrc})`;
+            if (classes.length > 0) {
+              text = `${text}{${classes.join(",")}}`;
+            }
+            console.log(text);
+            return text;
           }
         },
         {
@@ -167,37 +237,60 @@ function processPost(post) {
 
   markdown = "# " + postTitle + "\n\n" + markdown;
 
-    var header = "";
-    header += "---\n";
-    header += "created: " + postDate.getFullYear() + "-" + getPaddedNumber(postDate.getMonth() + 1) + "-" + getPaddedNumber(postDate.getDate()) + "\n";
-    if (categories.length > 0) {
-      header += "category:\n";
-      categories.forEach(function(category) {
-        header += "  - " + category + "\n";
-      });
-    }
-
-    header += "---\n";
-
-    fs.outputFile(fullPath + "/index.md", header + markdown, function(err) {
-      if(err !== null) {
-        console.error("Error writing post " + postTitle + " to disk!");
-        throw err;
-      }
+  var header = "";
+  header += "---\n";
+  header += "created: " + postDate.getFullYear() + "-" + getPaddedNumber(postDate.getMonth() + 1) + "-" + getPaddedNumber(postDate.getDate()) + "\n";
+  if (categories.length > 0) {
+    header += "category:\n";
+    categories.forEach(function(category) {
+      header += "  - " + category + "\n";
     });
+  }
+
+  header += "---\n";
+
+  fs.outputFile(fullPath + "/index.md", header + markdown, function(err) {
+    if(err !== null) {
+      console.error("Error writing post " + postTitle + " to disk!");
+      throw err;
+    }
+  });
 }
 
 function downloadFile(url, path) {
+  return;
+  if (url.startsWith("/deepo/")) {
+    url = "http://www.ubenzer.com" + url;
+  }
+  if (downloadedFiles.has(url+path)) { return; }
+  downloadedFiles.add(url+path);
   batch.push(function(done){
     console.log(`Downloading ${url} to ${path}...`);
     httpreq.download(url, path,
         function (err, progress) {},
         function (err){
           if (err) {
-            console.log(url, err);
+            console.log("FAILED DOWNLOAD :" + url, err);
           }
           done();
         });
+  });
+}
+
+function uploadComment(id, comment) {
+  batch.push(function(done) {
+    let postCommentsRef = allComments.child(id);
+    postCommentsRef.push({
+      name: comment["wp:comment_author"][0],
+      date: new Date(comment["wp:comment_date_gmt"][0]),
+      data: comment["wp:comment_content"][0]
+    }, function (error) {
+      if (error) {
+        console.error(error);
+        throw new Error(error);
+      }
+      done();
+    });
   });
 }
 
@@ -206,4 +299,31 @@ function getPaddedNumber(num) {
     return "0" + num;
   }
   return num;
+}
+
+function isFileImage(file) {
+  file = file.toLowerCase();
+  return file.endsWith(".jpg") || file.endsWith(".png") || file.endsWith(".gif");
+}
+
+function isUBenzerUrl(url) {
+  return url.startsWith("/deepo/") || url.startsWith("http://www.ubenzer.com/") ||
+    url.startsWith("https://www.ubenzer.com") || url.startsWith("//www.ubenzer.com") ||
+    url.startsWith("http://ubenzer.com/") ||
+    url.startsWith("https://ubenzer.com") || url.startsWith("//ubenzer.com");
+}
+
+function normalizeUBenzerUrl(url, isTarget) {
+  // if this is an image, we don't give a shit about small versions
+  url = url.replace(/-\d+x\d+\.(jpg|png|gif|JPG|PNG|GIF)$/, '.$1');
+  url = url.replace(".thumbnail", "");
+
+  if (!isTarget) { return url; }
+
+  if (url.endsWith("/")) {
+    url = url.slice(0, -1);
+  }
+  let urlParts = url.split("/");
+  let fileName = urlParts[urlParts.length - 1].toLowerCase();
+  return fileName;
 }
