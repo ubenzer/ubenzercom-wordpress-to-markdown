@@ -146,6 +146,7 @@ function processPost(post) {
           },
           replacement: function(content, node) {
             let href = node.getAttribute('href');
+            let isTargetBlank = node.getAttribute('target') === "_blank";
 
             if (isUBenzerUrl(href)) {
               let source = normalizeUBenzerUrl(href);
@@ -153,26 +154,37 @@ function processPost(post) {
               let downloadPath = fullPath + "/" + target;
 
               if (isFileImage(target)) {
-                console.log("THIS IS AN UBENZER IMAGE! " + source);
                 downloadFile(source, downloadPath);
-                // TODO we need to check if it links to itself or something special
-                // ‌‌node.querySelectorAll("*").length
-                // ‌‌node.querySelectorAll("img").length
-                // ‌‌node.querySelectorAll("img")[0].getAttribute("src")
-                return `[${content}](${target})`;
+                if (node.querySelectorAll("*").length === 1 && node.querySelectorAll("img").length === 1) {
+                  let imgSrc = node.querySelectorAll("img")[0].getAttribute("src");
+                  if (isUBenzerUrl(imgSrc)) {
+                    imgSrc = normalizeUBenzerUrl(imgSrc, true);
+                    if (imgSrc === target) {
+                      let title = "";
+                      if (node.querySelectorAll("img")[0].getAttribute("title")) {
+                        title = node.querySelectorAll("img")[0].getAttribute("title");
+                      } else if (node.querySelectorAll("img")[0].getAttribute("alt")) {
+                        title = node.querySelectorAll("img")[0].getAttribute("alt");
+                      } else {
+                        title = postTitle;
+                      }
+                      return `![${title}](${target}){link${isTargetBlank?',new':''}}`;
+                    }
+                  }
+                }
+                return `[${content}](${target})${isTargetBlank?'{new}':''}`;
               } else if (path.extname(target) !== "") {
                 downloadFile(source, downloadPath);
-                return `[${content}](${target})`;
+                return `[${content}](${target})${isTargetBlank?'{new}':''}`;
               } else {
                 // this is an internal link
                 if (!idLookup[target]) {
                   throw new Error("NOT FOUND INTERNAL LINK: " + href);
                 }
-                return `[${content}](@${idLookup[target]})`;
+                return `[${content}](@${idLookup[target]})${isTargetBlank?'{new}':''}`;
               }
             }
-            // TODO target blank
-            return `[${content}](${href})`;
+            return `[${content}](${href})${isTargetBlank?'{new}':''}`;
           }
         },
         {
@@ -186,7 +198,7 @@ function processPost(post) {
             } else if (node.getAttribute("alt")) {
               title = node.getAttribute("alt");
             } else {
-              console.log("IMG WITHOUT TITLE: " + src);  // TODO how many?
+              title = postTitle;
             }
 
             if (src === "https://go.microsoft.com/fwlink/?LinkId=161376") {
@@ -282,7 +294,7 @@ function uploadComment(id, comment) {
     let postCommentsRef = allComments.child(id);
     postCommentsRef.push({
       name: comment["wp:comment_author"][0],
-      date: new Date(comment["wp:comment_date_gmt"][0]),
+      date: new Date(comment["wp:comment_date_gmt"][0]).toISOString(),
       data: comment["wp:comment_content"][0]
     }, function (error) {
       if (error) {
