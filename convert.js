@@ -7,8 +7,10 @@ firebase.initializeApp({
 
 // As an admin, the app has access to read and write all data, regardless of Security Rules
 let db = firebase.database();
-let allComments = db.ref("comments");
+let allComments = db.ref("comments/byPost");
+let allPosts = db.ref("posts");
 allComments.set({});
+allPosts.set({});
 
 let xml2js = require("xml2js");
 let fs = require("fs-extra");
@@ -43,7 +45,7 @@ batch.concurrency(30);
 
 let idLookup = {};
 let parser = new xml2js.Parser();
-let data = fs.readFileSync("/Users/ub/Downloads/ubenzerumutbenzerodakim.wordpress.2016-05-19.xml");
+let data = fs.readFileSync("/Users/ub/Downloads/ubenzerumutbenzerodakim.wordpress.2016-06-12.xml");
 parser.parseString(data, function (err, result) {
   if (err) {
     console.log("Error parsing xml: " + err);
@@ -95,6 +97,7 @@ function processPost(post) {
   var id = postDate.getFullYear() + "/" + getPaddedNumber(postDate.getMonth() + 1) + "/" + slug;
 
   // process post comments
+  registerPost(id);
   let comments = post["wp:comment"];
   if (comments instanceof Array) {
     comments.forEach((comment) => {
@@ -270,7 +273,7 @@ function processPost(post) {
 }
 
 function downloadFile(url, path) {
-  return;
+  return
   if (url.startsWith("/deepo/")) {
     url = "http://www.ubenzer.com" + url;
   }
@@ -289,13 +292,32 @@ function downloadFile(url, path) {
   });
 }
 
+function registerPost(id) {
+  id = replaceAll(id, "/", "___");
+  batch.push(function(done) {
+    allPosts.child(id).set({
+      commentsEnabled: true,
+      commentsVisible:true
+    }, function (error) {
+      if (error) {
+        console.error(error);
+        throw new Error(error);
+      }
+      done();
+    });
+  });
+}
 function uploadComment(id, comment) {
+  id = replaceAll(id, "/", "___");
   batch.push(function(done) {
     let postCommentsRef = allComments.child(id);
     postCommentsRef.push({
+      date: +new Date(comment["wp:comment_date_gmt"][0]),
+      isDeleted: false,
+      isPublished: true,
       name: comment["wp:comment_author"][0],
-      date: new Date(comment["wp:comment_date_gmt"][0]).toISOString(),
-      data: comment["wp:comment_content"][0]
+      text: comment["wp:comment_content"][0],
+      userId: "$legacy"
     }, function (error) {
       if (error) {
         console.error(error);
@@ -338,4 +360,8 @@ function normalizeUBenzerUrl(url, isTarget) {
   let urlParts = url.split("/");
   let fileName = urlParts[urlParts.length - 1].toLowerCase();
   return fileName;
+}
+
+function replaceAll(str, what, withWhat) {
+  return str.replace(new RegExp(what, 'g'), withWhat);
 }
