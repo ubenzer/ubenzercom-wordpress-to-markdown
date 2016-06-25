@@ -41,11 +41,12 @@ let downloadedFiles = new Set();
 let batch = new Batch;
 batch.concurrency(30);
 
-//fs.emptyDirSync("./out/posts");
+const OUT_DIR = "../ubenzer.github.io/posts";
+fs.emptyDirSync(OUT_DIR);
 
 let idLookup = {};
 let parser = new xml2js.Parser();
-let data = fs.readFileSync("/Users/ub/Downloads/ubenzerumutbenzerodakim.wordpress.2016-06-12.xml");
+let data = fs.readFileSync("/Users/ub/Downloads/ubenzerumutbenzerodakim.wordpress.2016-06-22.xml");
 parser.parseString(data, function (err, result) {
   if (err) {
     console.log("Error parsing xml: " + err);
@@ -126,7 +127,7 @@ function processPost(post) {
     categories.push(cat);
   });
 
-  var fullPath = "./out/posts/" + postDate.getFullYear() + "/" + getPaddedNumber(postDate.getMonth() + 1) + "/" + slug;
+  var fullPath = OUT_DIR + "/" + postDate.getFullYear() + "/" + getPaddedNumber(postDate.getMonth() + 1) + "/" + slug;
   fs.ensureDirSync(fullPath);
 
   // Convert two new lines to paragraphs
@@ -273,7 +274,6 @@ function processPost(post) {
 }
 
 function downloadFile(url, path) {
-  return
   if (url.startsWith("/deepo/")) {
     url = "http://www.ubenzer.com" + url;
   }
