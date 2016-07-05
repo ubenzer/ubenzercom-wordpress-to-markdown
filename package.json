@@ -19,7 +19,7 @@
     "httpreq": "0.4.22",
     "shortcode-parser": "0.0.1",
     "to-markdown": "3.0.0",
-    "xml2js": "0.4.16"
+    "xml2js": "0.4.17"
   },
   "main": "convert.js"
 }
