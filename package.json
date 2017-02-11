@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "batch": "0.5.3",
-    "eol": "0.2.0",
+    "eol": "0.6.0",
     "firebase": "^3.0.5",
     "fs-extra": "0.30.0",
     "httpreq": "0.4.22",
