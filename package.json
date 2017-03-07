@@ -13,13 +13,13 @@
   },
   "dependencies": {
     "batch": "0.5.3",
-    "eol": "0.2.0",
+    "eol": "0.8.1",
     "firebase": "^3.0.5",
-    "fs-extra": "0.30.0",
-    "httpreq": "0.4.22",
+    "fs-extra": "2.0.0",
+    "httpreq": "0.4.23",
     "shortcode-parser": "0.0.1",
-    "to-markdown": "3.0.0",
-    "xml2js": "0.4.16"
+    "to-markdown": "3.0.3",
+    "xml2js": "0.4.17"
   },
   "main": "convert.js"
 }
