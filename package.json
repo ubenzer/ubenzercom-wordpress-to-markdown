@@ -19,7 +19,13 @@
     "httpreq": "0.4.22",
     "shortcode-parser": "0.0.1",
     "to-markdown": "3.0.0",
-    "xml2js": "0.4.16"
+    "xml2js": "0.4.16",
+    "snyk": "^1.192.3"
   },
-  "main": "convert.js"
+  "main": "convert.js",
+  "scripts": {
+    "snyk-protect": "snyk protect",
+    "prepublish": "npm run snyk-protect"
+  },
+  "snyk": true
 }
